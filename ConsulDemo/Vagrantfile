@@ -1,0 +1,76 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+number_word = {
+  1 => "one",
+  2 => "two",
+  3 => "three",
+  4 => "four",
+  5 => "five",
+  6 => "six",
+  7 => "seven",
+  8 => "eight",
+  9 => "nine",
+}
+
+Vagrant.configure("2") do |config|
+  config.vm.box = "generic/debian9"
+
+  config.vm.provider "virtualbox" do |vb|
+    vb.memory = 512
+  end
+
+  # File provisioner uses scp, so it can't deal with privilege escalation
+  # We first copy these to /tmp, then mv them via sudo
+  config.vm.provision "file", source: "./files/consul.service", destination: "/tmp/consul.service"
+  config.vm.provision "file", source: "./files/consul.hcl", destination: "/tmp/consul.hcl"
+  config.vm.provision "file", source: "./files/server.hcl", destination: "/tmp/server.hcl"
+
+  config.vm.provision "shell", inline: <<-EOF
+    sudo apt update
+    sudo apt install -y p7zip-full
+
+    wget -nv https://releases.hashicorp.com/consul/1.9.4/consul_1.9.4_linux_amd64.zip
+
+    7z x consul_1.9.4_linux_amd64.zip -o/usr/bin
+
+    sudo mkdir -p /etc/consul.d /opt/consul
+    sudo useradd --system --home /etc/consul.d --shell /bin/false consul
+
+    sudo mv /tmp/consul.service /lib/systemd/system/consul.service
+    sudo mv /tmp/consul.hcl /etc/consul.d/consul.hcl
+
+    sudo chown -R consul: /etc/consul.d /opt/consul
+  EOF
+
+  # primary nodes. at least 3 for quorum
+  1.upto ENV.fetch('CONSUL_PRIMARY_NODES', 3).to_i do |idx|
+    node_ip = "192.168.22.1#{idx}"
+
+    config.vm.define "primary#{idx}" do |prim|
+      prim.vm.network "private_network", ip: node_ip
+      prim.vm.hostname = "primary-#{number_word[idx]}"
+
+      prim.vm.provision "shell", inline: <<-EOF
+        sudo mv /tmp/server.hcl /etc/consul.d/server.hcl
+
+        sudo systemctl enable --now consul
+      EOF
+
+    end
+  end
+
+  # agent nodes
+  1.upto ENV.fetch('CONSUL_AGENT_NODES', 2).to_i do |idx|
+    node_ip = "192.168.32.1#{idx}"
+
+    config.vm.define "agent#{idx}" do |ag|
+      ag.vm.network "private_network", ip: node_ip
+      ag.vm.hostname = "agent-#{number_word[idx]}"
+
+      ag.vm.provision "shell", inline: <<-EOF
+        sudo systemctl enable --now consul
+      EOF
+    end
+  end
+end
