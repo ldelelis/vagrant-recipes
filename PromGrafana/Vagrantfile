@@ -11,46 +11,78 @@ PROMETHEUS_VERSION = ENV.fetch('PROMETHEUS_VERSION', "2.26.0")
 Vagrant.configure("2") do |config|
   config.vm.box = "generic/ubuntu2004"
 
-  config.vm.provision "file", source: "./files/prometheus.yml", destination: "/tmp/prometheus.yml"
-  config.vm.provision "file", source: "./files/prometheus.service", destination: "/tmp/prometheus.service"
-  config.vm.provision "file", source: "./files/prometheus-datasource.yaml", destination: "/tmp/prometheus-datasource.yaml"
+  config.vm.define "prometheus" do |prom|
+    prom.vm.network "private_network", ip: "192.168.5.10"
 
-  config.vm.provision "shell", inline: <<-EOF
-    # setup users
-    sudo useradd --system -M --shell /bin/false prom
-    sudo useradd --system -M --shell /bin/false grafana
+    prom.vm.provision "file", source: "./files/prometheus.yml", destination: "/tmp/prometheus.yml"
+    prom.vm.provision "file", source: "./files/prometheus.service", destination: "/tmp/prometheus.service"
+    prom.vm.provision "file", source: "./files/blackbox_exporter.service", destination: "/tmp/blackbox_exporter.service"
+    prom.vm.provision "file", source: "./files/prometheus-datasource.yaml", destination: "/tmp/prometheus-datasource.yaml"
 
-    # prometheus
-    ## prepare directories
-    sudo mkdir -p /etc/prometheus /var/lib/prometheus
+    prom.vm.provision "shell", inline: <<-EOF
+      # setup users
+      sudo useradd --system -M --shell /bin/false prom
+      sudo useradd --system -M --shell /bin/false blackbox_exporter
 
-    ## download and install
-    wget -nv -P /tmp https://github.com/prometheus/prometheus/releases/download/v#{PROMETHEUS_VERSION}/prometheus-#{PROMETHEUS_VERSION}.linux-amd64.tar.gz
-    cd /tmp
-    tar xzvf prometheus-#{PROMETHEUS_VERSION}.linux-amd64.tar.gz
-    sudo mv prometheus-#{PROMETHEUS_VERSION}.linux-amd64/prom{etheus,tool} /usr/local/bin
-    sudo cp -R prometheus-#{PROMETHEUS_VERSION}.linux-amd64/console{s,_libraries} /etc/prometheus
-    sudo chown -R prom: /usr/local/bin/prom{etheus,tool} /etc/prometheus /var/lib/prometheus
+      # prometheus
+      ## prepare directories
+      sudo mkdir -p /etc/prometheus /var/lib/prometheus
 
-    ## copy homegrown configs
-    sudo mv /tmp/prometheus.yml /etc/prometheus/prometheus.yml
-    sudo mv /tmp/prometheus.service /etc/systemd/system/prometheus.service
+      ## download and install
+      wget -nv -P /tmp https://github.com/prometheus/prometheus/releases/download/v#{PROMETHEUS_VERSION}/prometheus-#{PROMETHEUS_VERSION}.linux-amd64.tar.gz
+      cd /tmp
+      tar xzvf prometheus-#{PROMETHEUS_VERSION}.linux-amd64.tar.gz
+      sudo mv prometheus-#{PROMETHEUS_VERSION}.linux-amd64/prom{etheus,tool} /usr/local/bin
+      sudo cp -R prometheus-#{PROMETHEUS_VERSION}.linux-amd64/console{s,_libraries} /etc/prometheus
+      sudo chown -R prom: /usr/local/bin/prom{etheus,tool} /etc/prometheus /var/lib/prometheus
 
-    ## enable and start the service
-    sudo systemctl enable --now prometheus
+      ## download and install blackbox_exporter
+      wget -nv -P /tmp https://github.com/prometheus/blackbox_exporter/releases/download/v0.18.0/blackbox_exporter-0.18.0.linux-amd64.tar.gz
+      tar xzvf /tmp/blackbox_exporter-0.18.0.linux-amd64.tar.gz
+      sudo mv blackbox_exporter-0.18.0.linux-amd64/blackbox_exporter /usr/local/bin/blackbox_exporter
+      sudo mv blackbox_exporter-0.18.0.linux-amd64/blackbox.yml /etc/prometheus/blackbox.yml
 
-    # grafana
-    wget -nv -q -O - https://packages.grafana.com/gpg.key | sudo apt-key add -
-    echo "deb https://packages.grafana.com/enterprise/deb stable main" | sudo tee -a /etc/apt/sources.list.d/grafana.list
-    echo "deb https://packages.grafana.com/enterprise/deb stable main" | sudo tee -a /etc/apt/sources.list.d/grafana.list
-    sudo apt update
-    sudo apt install -y grafana-enterprise
+      ## copy homegrown configs
+      sudo mv /tmp/prometheus.yml /etc/prometheus/prometheus.yml
+      sudo mv /tmp/prometheus.service /etc/systemd/system/prometheus.service
+      sudo mv /tmp/blackbox_exporter.service /etc/systemd/system/blackbox_exporter.service
 
-    sudo mv /tmp/prometheus-datasource.yaml /etc/grafana/provisioning/datasources/prometheus.yaml
+      ## enable and start services
+      sudo systemctl enable --now blackbox_exporter
+      sudo systemctl enable --now prometheus
 
-    ## enable and start the service
-    sudo systemctl enable --now grafana-server
-  EOF
+      # grafana
+      wget -nv -q -O - https://packages.grafana.com/gpg.key | sudo apt-key add -
+      echo "deb https://packages.grafana.com/enterprise/deb stable main" | sudo tee -a /etc/apt/sources.list.d/grafana.list
+      echo "deb https://packages.grafana.com/enterprise/deb stable main" | sudo tee -a /etc/apt/sources.list.d/grafana.list
+      sudo apt update
+      sudo apt install -y grafana-enterprise
 
-  config.vm.network "forwarded_port", guest: 3000, host: 3000
+      sudo mv /tmp/prometheus-datasource.yaml /etc/grafana/provisioning/datasources/prometheus.yaml
+
+      ## enable and start the service
+      sudo systemctl enable --now grafana-server
+    EOF
+
+    prom.vm.network "forwarded_port", guest: 3000, host: 3000
+    prom.vm.network "forwarded_port", guest: 9090, host: 9090
+  end
+
+  config.vm.define "node" do |node|
+    node.vm.network "private_network", ip: "192.168.50.100"
+
+    node.vm.provision "file", source: "./files/node_exporter.service", destination: "/tmp/node_exporter.service"
+
+    node.vm.provision "shell", inline: <<-EOF
+      sudo useradd --system -M --shell /bin/false node_exporter
+
+      wget -nv -P /tmp https://github.com/prometheus/node_exporter/releases/download/v1.1.2/node_exporter-1.1.2.linux-amd64.tar.gz
+      tar xzvf /tmp/node_exporter-1.1.2.linux-amd64.tar.gz
+      sudo mv node_exporter-1.1.2.linux-amd64/node_exporter /usr/local/bin/node_exporter
+
+      sudo mv /tmp/node_exporter.service /etc/systemd/system/node_exporter.service
+
+      sudo systemctl enable --now node_exporter
+    EOF
+  end
 end
