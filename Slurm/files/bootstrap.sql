@@ -1,0 +1,4 @@
+USE mysql;
+CREATE DATABASE IF NOT EXISTS slurm_acct_db;
+CREATE USER IF NOT EXISTS 'slurm'@'%' IDENTIFIED BY 'slurm';
+GRANT ALL PRIVILEGES ON `%`.* TO 'slurm'@'%';

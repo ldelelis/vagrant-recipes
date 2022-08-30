@@ -1,0 +1,3 @@
+.vagrant/
+files/*.bz2
+boxes/

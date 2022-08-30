@@ -1,0 +1,78 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+
+Vagrant.configure("2") do |config|
+  config.vm.box = "rockylinux-8-slurm"
+
+  config.vm.define "database" do |db|
+    db.vm.box = "bento/rockylinux-8"
+    db.vm.hostname = "database"
+    db.vm.network "private_network", ip: "192.168.59.2"
+
+    db.vm.provision "file", source: "./files/bootstrap.sql", destination: "/tmp/bootstrap.sql"
+    db.vm.provision "file", source: "./files/mariadb-server.cnf", destination: "/tmp/mariadb-server.cnf"
+    db.vm.provision "shell", inline: <<-EOF
+      sudo dnf update -y
+      sudo dnf install mariadb-server -y
+      sudo cp /tmp/mariadb-server.cnf /etc/my.cnf.d/mariadb-server.cnf
+      sudo systemctl enable --now mariadb
+
+      sudo mysql -D mysql < /tmp/bootstrap.sql
+    EOF
+  end
+
+  config.vm.define "dbd" do |db|
+    db.vm.network "private_network", ip: "192.168.58.2"
+    db.vm.network "forwarded_port", guest: 6819, host: 6819
+    db.vm.hostname = "dbd"
+
+    db.vm.provision "file", source: "./files/slurmdbd.conf", destination: "/tmp/slurmdbd.conf"
+    db.vm.provision "shell", inline: <<-EOF
+      sudo cp /tmp/slurmdbd.conf /etc/slurm/slurmdbd.conf
+      sudo chown slurm: /etc/slurm/slurmdbd.conf
+      sudo chmod 600 /etc/slurm/slurmdbd.conf
+      sudo systemctl enable --now slurmdbd
+    EOF
+  end
+
+  config.vm.define "management-secondary" do |mgmt|
+    mgmt.vm.network "private_network", ip: "192.168.57.200"
+    mgmt.vm.hostname = "management-secondary"
+
+    mgmt.vm.provision "shell", inline: <<-EOF
+      sudo mkdir -p /var/spool/slurmctld
+      sudo chown slurm: /var/spool/slurmctld
+      sudo systemctl enable --now slurmctld
+    EOF
+  end
+
+  config.vm.define "management-master" do |mgmt|
+    mgmt.vm.network "private_network", ip: "192.168.57.100"
+    mgmt.vm.network "forwarded_port", guest: 6817, host: 6817
+    mgmt.vm.hostname = "management-master"
+
+    mgmt.vm.provision "shell", inline: <<-EOF
+      sudo mkdir -p /var/spool/slurmctld
+      sudo chown slurm: /var/spool/slurmctld
+      sudo systemctl enable --now slurmctld
+    EOF
+  end
+
+  1.upto ENV.fetch("WORKER_NODES", 3).to_i do |idx|
+    node_ip = "192.168.56.#{idx+1}"
+
+    config.vm.define "worker-#{idx}" do |wrk|
+      wrk.vm.network "private_network", ip: node_ip
+      wrk.vm.hostname = "worker-#{idx}"
+
+      wrk.vm.provision "file", source: "./files/cgroup.conf", destination: "/tmp/cgroup.conf"
+      wrk.vm.provision "shell", inline: <<-EOF
+        sudo mv /tmp/cgroup.conf /etc/slurm/cgroup.conf
+        sudo mkdir -p /var/spool/slurmd
+        sudo chown -R slurm: /var/spool/slurmd
+        sudo systemctl enable --now slurmd
+      EOF
+    end
+  end
+end

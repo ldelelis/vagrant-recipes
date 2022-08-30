@@ -1,0 +1,34 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+
+Vagrant.configure("2") do |config|
+  config.vm.box = "bento/rockylinux-8"
+
+  config.vm.provision "file", source: "./files/slurm-22.05.3.tar.bz2", destination: "$HOME/slurm-22.05.3.tar.bz2"
+  config.vm.provision "file", source: "./files/slurm.conf", destination: "/tmp/slurm.conf"
+  config.vm.provision "file", source: "./files/munge.key", destination: "/tmp/munge.key"
+  config.vm.provision "shell", inline: <<-EOF
+    set -e
+
+    sudo dnf install epel-release -y
+    sudo dnf config-manager --set-enabled powertools
+    sudo dnf update -y
+    sudo dnf group install "Development Tools" -y
+    sudo dnf install rpmdevtools rpm-build munge munge-devel pam-devel python3 readline-devel mysql-devel perl-Switch -y
+    rpmbuild -ta slurm*.tar.bz2
+    sudo rpm --install /root/rpmbuild/RPMS/x86_64/*.rpm
+
+    sudo useradd slurm
+    sudo cp /tmp/slurm.conf /etc/slurm/slurm.conf
+    sudo chown slurm:slurm /etc/slurm/slurm.conf
+    sudo chmod 600 /etc/slurm/slurm.conf
+    sudo mkdir /var/log/slurm
+    sudo chown -R slurm: /var/log/slurm
+    sudo mv /tmp/munge.key /etc/munge/munge.key
+    sudo chown munge: /etc/munge/munge.key
+    sudo chmod 400 /etc/munge/munge.key
+
+    sudo systemctl enable munge
+  EOF
+end
