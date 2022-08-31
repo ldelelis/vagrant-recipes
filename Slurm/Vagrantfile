@@ -5,10 +5,14 @@
 Vagrant.configure("2") do |config|
   config.vm.box = "rockylinux-8-slurm"
 
+  config.vm.provider :virtualbox do |vb|
+    vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+  end
+
   config.vm.define "database" do |db|
     db.vm.box = "bento/rockylinux-8"
     db.vm.hostname = "database"
-    db.vm.network "private_network", ip: "192.168.59.2"
+    db.vm.network "private_network", ip: "192.168.56.250"
 
     db.vm.provision "file", source: "./files/bootstrap.sql", destination: "/tmp/bootstrap.sql"
     db.vm.provision "file", source: "./files/mariadb-server.cnf", destination: "/tmp/mariadb-server.cnf"
@@ -23,7 +27,7 @@ Vagrant.configure("2") do |config|
   end
 
   config.vm.define "dbd" do |db|
-    db.vm.network "private_network", ip: "192.168.58.2"
+    db.vm.network "private_network", ip: "192.168.56.249"
     db.vm.network "forwarded_port", guest: 6819, host: 6819
     db.vm.hostname = "dbd"
 
@@ -37,7 +41,7 @@ Vagrant.configure("2") do |config|
   end
 
   config.vm.define "management-secondary" do |mgmt|
-    mgmt.vm.network "private_network", ip: "192.168.57.200"
+    mgmt.vm.network "private_network", ip: "192.168.56.151"
     mgmt.vm.hostname = "management-secondary"
 
     mgmt.vm.provision "shell", inline: <<-EOF
@@ -48,7 +52,7 @@ Vagrant.configure("2") do |config|
   end
 
   config.vm.define "management-master" do |mgmt|
-    mgmt.vm.network "private_network", ip: "192.168.57.100"
+    mgmt.vm.network "private_network", ip: "192.168.56.150"
     mgmt.vm.network "forwarded_port", guest: 6817, host: 6817
     mgmt.vm.hostname = "management-master"
 
@@ -63,6 +67,10 @@ Vagrant.configure("2") do |config|
     node_ip = "192.168.56.#{idx+1}"
 
     config.vm.define "worker-#{idx}" do |wrk|
+      wrk.vm.provider "virtualbox" do |vb|
+        vb.cpus = 1
+      end
+
       wrk.vm.network "private_network", ip: node_ip
       wrk.vm.hostname = "worker-#{idx}"
 
